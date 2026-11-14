@@ -47,6 +47,7 @@ internal sealed record DesktopPreferences
     // automatic layout and every default.
     public string? ExpandedPanelLayout { get; init; }
     public string? ExpandedPanelOptions { get; init; }
+    public string? ConversationGroups { get; init; }
     internal static readonly string[] BarSizes = ["small", "standard", "large", "extraLarge"];
     internal static readonly string[] Appearances = ["classic", "liquidGlass", "liquidGlassLight", "graphite"];
     public string CompactSingleTask { get; init; } = "stage";
@@ -90,6 +91,8 @@ internal sealed record DesktopPreferences
     public bool ShowClaudeCloudProjects { get; init; } = true;
     public bool ClaudeProgressRing { get; init; } = true;
     public bool CodexProgressRing { get; init; } = true;
+    // This fork follows Codex's pinned sidebar; no separate selection to maintain.
+    public bool CodexPinnedOnly { get; init; } = true;
     public bool MonitorSSH { get; init; } = true;
     public bool AutomaticUpdates { get; init; } = true;
     public int RetentionMinutes { get; init; } = 30;
@@ -116,6 +119,7 @@ internal sealed record DesktopPreferences
         && (IslandDisplayPlaces == null || Encoding.UTF8.GetByteCount(IslandDisplayPlaces) <= IslandScreenMemory.ByteLimit)
         && (ExpandedPanelLayout == null || Encoding.UTF8.GetByteCount(ExpandedPanelLayout) <= PanelChoices.LayoutByteLimit)
         && (ExpandedPanelOptions == null || Encoding.UTF8.GetByteCount(ExpandedPanelOptions) <= PanelChoices.OptionsByteLimit)
+        && (ConversationGroups == null || Encoding.UTF8.GetByteCount(ConversationGroups) <= 262144)
         && BarSizes.Contains(CompactBarSize)
         && CompactSingleTask is "stage" or "count" or "percent" && CompactMetric is "remaining" or "pace"
         && ValidWindow(CodexQuotaWindow) && ValidWindow(ClaudeQuotaWindow)
@@ -157,6 +161,7 @@ internal sealed record DesktopPreferences
             showClaudeCloudProjects = ShowClaudeCloudProjects,
             claudeProgressRing = ClaudeProgressRing,
             codexProgressRing = CodexProgressRing,
+            codexPinnedOnly = CodexPinnedOnly,
             deepseekProgressRing = DeepSeekProgressRing,
             monitorSSH = MonitorSSH,
             deepseekSettings = new { mode = DeepSeekMode, daily = DeepSeekDailyBudget, weekly = DeepSeekWeeklyBudget,

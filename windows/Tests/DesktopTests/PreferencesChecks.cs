@@ -5,6 +5,29 @@ internal static class PreferencesChecks
 {
     internal static DesktopPreferences Run()
     {
+        ConversationOrderChecks.Run();
+        var groups = new[] { new ConversationGroup("a", "Development", ["one", "two"]), new ConversationGroup("b", "Notes", ["three"]) };
+        var reordered = ConversationGroups.DropGroup(groups, "a", "b", after: true, merge: false);
+        Check(reordered.Select(g => g.Id).SequenceEqual(new[] { "b", "a" }) && reordered[1] == groups[0] && reordered[0] == groups[1], "Ordinary group drops reorder without merging or changing membership");
+        Check(ConversationGroups.DropGroup(reordered, "a", "b", after: false, merge: false).SequenceEqual(groups), "Group order can move upward again");
+        Check(ConversationGroups.DropGroup(groups, "a", null, after: false, merge: false).SequenceEqual(reordered), "Ungrouped is an append target, not a request to dissolve a dragged group");
+        Check(ConversationGroups.DropGroup(groups, "a", "a", false, true).SequenceEqual(groups)
+            && ConversationGroups.DropGroup(groups, "a", null, false, true).SequenceEqual(groups)
+            && ConversationGroups.DropGroup(groups, "missing", "b", false, false).SequenceEqual(groups)
+            && ConversationGroups.DropGroup(groups, "a", "missing", false, false).SequenceEqual(groups), "Self, invalid and ungrouped merge targets leave groups intact");
+        var reorderedJson = ConversationGroups.Read(null).Update("profile", reordered);
+        var reorderedPrefs = PreferencesCodec.Decode(PreferencesCodec.Encode(new DesktopPreferences { ConversationGroups = reorderedJson }));
+        Check(ConversationGroups.Read(reorderedPrefs.ConversationGroups).For("profile").Select(g => g.Id).SequenceEqual(new[] { "b", "a" }), "Group order survives the stored preference round trip");
+        Check(ConversationGroups.DropGroup(groups, "a", "b", false, true) is [{ Id: "b", Members.Length: 3 }], "Explicit group merge still combines both memberships");
+        var merged = ConversationGroups.Move(groups, ["one", "two"], "b");
+        Check(merged.Length == 1 && merged[0].Members.Length == 3, "Merging preserves every chat exactly once");
+        var moved = ConversationGroups.Move(merged, ["two"], null);
+        Check(moved[0].Members.SequenceEqual(new[] { "three", "one" }), "Moving out retains other members");
+        var savedGroups = ConversationGroups.Read(null).Update("profile", moved.Select(g => g with { Name = "Renamed", Collapsed = true }).ToArray());
+        var encodedGroups = PreferencesCodec.Decode(PreferencesCodec.Encode(new DesktopPreferences { ConversationGroups = savedGroups }));
+        var restoredGroups = ConversationGroups.Read(encodedGroups.ConversationGroups);
+        Check(restoredGroups.For("profile")[0].Name == "Renamed" && restoredGroups.For("profile")[0].Collapsed && restoredGroups.For("other").Length == 0, "Groups round trip and stay scoped to a profile");
+        Check(ConversationGroups.Read("broken").For("profile").Length == 0, "Invalid group storage is bounded and safe");
         string root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "pacer-prefs-" + Guid.NewGuid().ToString("N")));
         string file = Path.Combine(root, "preferences.json");
         // Maintenance's inspection mode must remain read-only, including on damage.
@@ -12,6 +35,9 @@ internal static class PreferencesChecks
         try
         {
             var missing = store.Load();
+            Check(missing.Value.CodexPinnedOnly, "This fork defaults to Codex's pinned conversations");
+            var allConversations = missing.Value with { CodexPinnedOnly = false };
+            Check(!PreferencesCodec.Decode(PreferencesCodec.Encode(allConversations)).CodexPinnedOnly, "An explicit all-conversations preference survives encoding");
             Check(!missing.Unavailable && missing.Value.IsValid && !Directory.Exists(root), "Missing settings must use defaults without creating files");
             Check(missing.Value.IslandAppearance == "liquidGlass", "The appearance default matches the Mac preference");
             Check(missing.Value.ShowEmbeddedCodexSessions && missing.Value.ShowEmbeddedClaudeSessions, "Both independent embedding preferences default to visible");

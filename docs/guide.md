@@ -15,6 +15,14 @@
 
 ## Getting started
 
+### Pinned conversations (Windows fork)
+
+Pin conversations in Codex's sidebar to follow them in Pacer. Pin and unpin changes update the existing task list and reminders automatically, including child agents. Idle conversations are not presented as running tasks. Other providers keep their normal behavior.
+
+For a custom Codex data directory, select the same directory in **Codex → Custom locations → Codex home**. Pacer rereads the pinned list after restart and recognizes resumed conversations by their original thread identity.
+
+This follows the selected local Codex profile's pinned section, up to 256 conversations; independent pinned lists on other devices are not merged. A failed read retains the last verified selection and reports it unavailable, without falling back to all tasks. Disable automatic update checks when installing a custom build of this fork so upstream updates do not overwrite it.
+
 The first time you open Codex Pacer, a short guide walks you through it:
 
 1. What each part of the collapsed bar means.
@@ -152,3 +160,9 @@ Changes apply right away. When an update is available, it shows in the sidebar a
 2. Sign out of DeepSeek or remove the API key on the DeepSeek page.
 3. Turn off **Open at Login**, then quit Pacer.
 4. On a Mac, move Codex Pacer from Applications to the Trash. On Windows, uninstall it from **Apps** in Windows Settings.
+
+### Windows fork: pinned conversations and groups
+
+Groups containing a running chat appear first, and running chats appear first within each group. Ungrouped follows the same rule. Equal activity keeps manual order; once activity ends, the original order returns. Collapsed groups stay collapsed. Automatic reordering waits while dragging or editing a group name, and does not rewrite the saved order.
+
+All pinned Codex chats stay in the expanded list, including idle chats. Drop a chat onto another to create a group, onto a group header to move it, or onto Ungrouped to move it out. Drag group headers to reorder them; the insertion line shows the new position. Hold Shift while dropping a group onto another to merge them; the hint changes to confirm the merge. Click a name to rename, and use the arrow to collapse. The row context menu also offers move targets. Groups, order and collapsed state persist only in Pacer, scoped to the Codex data folder; the Codex sidebar is unchanged.

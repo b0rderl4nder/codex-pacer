@@ -89,6 +89,20 @@ Rows show the executing turn's model and reasoning effort. Codex reads them from
 
 ## Codex
 
+### Windows fork: pinned conversation scope
+
+`codexPinnedOnly` is a Windows preference, defaulting to true in this fork. The optional engine field defaults to false for existing callers and demo ignores it. Core owns the selection reader and visibility policy; Windows wires it into collection and watches the selected profile's database, WAL and legacy global-state file. The normal coalesced refresh rereads membership, with a full discovery when it changes.
+
+`CodexPinnedThreads` opens the newest `state_N.sqlite` read-only. `threads.thread_section_id` matching Codex Desktop's reserved pinned section (`01984de2-8f74-7c91-a3b2-5c5e937cf318`) is authoritative; older schemas use `is_pinned`, then an unmigrated `pinned-thread-ids` list. Migration receipts never substitute for current membership. Archived threads are excluded. Failed, malformed or over-limit reads remain distinct from an empty list; the host retains the last verified selection only for the same profile and exposes an unavailable source. The 256-thread bound matches desktop discovery.
+
+Pinned IDs receive discovery and reader priority beyond the default 16 cursor slots. Visibility includes same-host descendants and filters tasks, attention and notifications without acknowledging hidden endings. Source authentication and writer proofs remain unchanged. The local list can select the same conversation on an already-authorized remote source; it never authorizes a new host or reads a remote pinned catalog.
+
+Rollout lookup uses the index's `id` and `rollout_path`, then verifies `session_meta.id`. A filename suffix is not identity: resumed rollouts can contain an additional UUID. Without an indexed path, bounded recent candidates are checked by metadata. An indexed path with a mismatched header fails closed, and superseded reader cursors are dropped without inventing an ending.
+
+`CodexPinnedThreadsTests` covers schema migration, pin/unpin/archive, failures, renewed rollout paths, foreign metadata, more than 16 pins, descendant scope and hidden attention. The installed app's preference can be set to `codexPinnedOnly: false` for upstream visibility behavior; no extra selection UI is added.
+
+Fork CI runs one compiler worker per build step. `scripts/ci/memory-guard.py` checks available memory before launch and every five seconds, reports the launched process tree's RSS, and stops only that step if a memory read fails or available memory drops below 1.5 GiB. It never restarts the step. .NET uses one reported processor and a 2 GiB GC heap limit. These limits apply on the hosted build machines, not to the running desktop app.
+
 ### Quota
 
 Quota comes from a dedicated read-only app-server child (`-s read-only -a never app-server`) using `account/read` and `account/rateLimits/read`. Multiple service buckets take precedence over a legacy single bucket; credits and resets come from the service, never from API-price conversion. Missing data stays unavailable.
@@ -493,3 +507,7 @@ python3 scripts/performance/benchmark-events.py \
 Use the intended baseline ref instead of `HEAD` for committed changes. Results measure component CPU cost, not whole-app speed, memory, energy or SSH IO. Keep raw results under ignored `output/`, and profile the packaged app for UI measurements.
 
 Live UI measurements need a verified candidate PID, an unlocked screen and fresh main-panel checks at the interval boundaries; a window with unknown lock timing or possibly stale frames is UI-unconfirmed and excluded. Record task and source changes during the run, since an active run is not idle. Per-process CPU and energy counters cover only the captured processes, not WindowServer, the GPU, remote helpers or whole-system power.
+
+Pinned conversation cards remain in the Windows expanded panel while idle. The engine adds catalog-only rows after lifecycle projection; they do not enter notification, rate, completion or active counters. Manual groups are Windows-only, profile-scoped, persisted by the existing preference transaction in `conversationGroups`, and never write Codex sidebar state. Drag payloads distinguish group identity from chat membership: ordinary group drops reorder the stored group array without changing members, while Shift explicitly selects a merge. Dropping a group at Ungrouped appends it without dissolving it. WPF feedback uses an insertion line for reordering and an outline plus merge hint for Shift drops; routed-event tests cover both paths using synthetic input.
+
+`ConversationGroups.Sections` projects saved membership and order through a stable running-first sort for both sections and rows (`Phase == "running"`). Ungrouped participates in the same projection. No preference transaction is involved in activity updates; completion restores the saved order. The structure signature includes projected row and section order, so phase transitions rebuild only when the visible order changes. Dragging and inline rename defer activity-driven rebuilds until the interaction finishes.

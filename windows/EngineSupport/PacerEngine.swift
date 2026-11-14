@@ -224,6 +224,11 @@ actor EngineRuntime {
     private var snapshotEmission = EngineSnapshotEmission()
     private var hideProjects = false
     private var showEmbeddedCodexSessions = true
+    private var codexPinnedOnly = false
+    private var pinnedCodexThreads: Set<String> = []
+    private var pinnedCodexTitles: [String: String] = [:]
+    private var pinnedCodexHome: URL?
+    private var pinnedCodexAvailable = true
     private var monitorRemoteControl = false
     /// Dot (Durable) tasks are opt-in: off, the Desktop collector starts no
     /// catalog poll and the Durable progress plugin is removed.
@@ -430,7 +435,7 @@ actor EngineRuntime {
     private var refreshActivityMonitorsRequested = false
     private var forceBalanceRequested = false
     #if os(Windows)
-    private lazy var logWatcher = ActivityLogWatcher { [weak self] discover in
+    private lazy var logWatcher = ActivityLogWatcher(fileExtensions: ["jsonl", "zstd", "json", "sqlite", "sqlite-wal"]) { [weak self] discover in
         Task { await self?.refresh(discover: discover, refreshActivityMonitors: false) }
     }
     #endif
@@ -1032,6 +1037,7 @@ actor EngineRuntime {
         if let executable = parameters.codexExecutable { codexExecutable = executable }
         if let value = parameters.claudeProgressRing { claudeProgressRing = value }
         if let value = parameters.codexProgressRing { codexProgressRing = value }
+        if let value = parameters.codexPinnedOnly { codexPinnedOnly = value }
         if let value = parameters.deepseekProgressRing { deepseekProgressRing = value }
         moduleSettings = updatedSettings; installation = detected
         if parameters.providerModes != nil { moduleConfigurationActive = true }
@@ -1507,6 +1513,7 @@ actor EngineRuntime {
                 else if FileManager.default.fileExists(atPath: home.path, isDirectory: &isDirectory), isDirectory.boolValue { directories.append(home) }
             }
         }
+        if codexPinnedOnly, enabled.contains(.codex) { directories += CodexPinnedThreads.watchURLs(home: codexHome) }
         logWatcher.update(directories, interval: expanded ? ActivityRefreshPolicy.expanded.interval : ActivityRefreshPolicy.collapsed.interval,
             flushPending: flushPending)
         // Register before completing initialization or a source change, so a
@@ -2081,13 +2088,34 @@ actor EngineRuntime {
                 available: true, transport: "demo", reason: nil) }
         } else {
             if enabled.contains(.codex) {
-                let result = await codexReader.read(home: codexHome, now: date, phaseAwareRate: true, metricsOnly: !discover)
+                var pinsChanged = false
+                if codexPinnedOnly {
+                    let home = codexHome
+                    if pinnedCodexHome != home { pinnedCodexThreads = []; pinnedCodexTitles = [:]; pinnedCodexHome = home; pinsChanged = true }
+                    let catalog = await Task.detached(priority: .utility) {
+                        let ids = CodexPinnedThreads.read(home: home)
+                        return (ids, ids.flatMap { CodexPinnedThreads.titles(home: home, ids: $0) })
+                    }.value
+                    let pins = catalog.0
+                    guard active, generation == revision else { return }
+                    pinnedCodexAvailable = pins != nil
+                    if let pins {
+                        pinsChanged = pinsChanged || pins != pinnedCodexThreads; pinnedCodexThreads = pins
+                        pinnedCodexTitles = Dictionary(uniqueKeysWithValues: pins.map { ($0, catalog.1?[$0] ?? pinnedCodexTitles[$0] ?? String($0.prefix(8))) })
+                    }
+                }
+                let result = await codexReader.read(home: codexHome, now: date, phaseAwareRate: true,
+                    metricsOnly: !discover && !pinsChanged, preferredThreads: codexPinnedOnly ? pinnedCodexThreads : [])
                 guard generation == revision else { return }
                 inbox.remove(activityIDs: result.excludedIDs)
                 current += result.activities; pending += result.requests
                 status.append(.init(id: "codex:local-logs", provider: "codex",
                     available: FileManager.default.fileExists(atPath: codexHome.appendingPathComponent("sessions").path),
                     transport: "logs", reason: nil))
+                if codexPinnedOnly && !pinnedCodexAvailable {
+                    status.append(.init(id: "codex:pinned-list", provider: "codex", available: false,
+                        transport: "local-index", reason: "Pinned conversation list unavailable; retaining the last verified selection."))
+                }
             }
             if refreshMonitors {
                 if enabled.contains(.claude) { await claudeActivityMonitor.refresh() }
@@ -2120,7 +2148,8 @@ actor EngineRuntime {
             if left != right { return left }
             return ($0.lastObserved ?? .distantPast) > ($1.lastObserved ?? .distantPast)
         }.prefix(256).compactMap(\.threadID)
-        await desktopMonitor?.discover(candidates)
+        let discovery = !demo && codexPinnedOnly ? pinnedCodexThreads.sorted() + candidates.filter { pinnedCodexThreads.contains($0) } : candidates
+        await desktopMonitor?.discover(discovery)
         await updateSourceWatches()
         guard active, generation == revision, !Task.isCancelled else { return }
         await claudeCloudMonitor?.startAfterPublication()
@@ -2216,7 +2245,8 @@ actor EngineRuntime {
         .init(embeddedProviders: Set(AgentProvider.allCases.filter {
                 $0 == .codex ? showEmbeddedCodexSessions : $0 != .claude || showEmbeddedClaudeSessions
             }),
-            showsClaudeCloudProjects: showClaudeCloudProjects)
+            showsClaudeCloudProjects: showClaudeCloudProjects,
+            pinnedCodexThreadIDs: !demo && codexPinnedOnly ? pinnedCodexThreads : nil)
     }
     private func scheduleActivityDisplay(at date: Date) {
         let deadline = activityState.nextDisplayDeadline(at: date, retention: retention, progressRingProviders: progressRingProviders)
@@ -2333,7 +2363,9 @@ actor EngineRuntime {
             #if os(Windows)
             let codexDefaultProfile = demo || WindowsActivityNavigation.isDefaultProfile(codexHome, provider: .codex)
             #endif
-            navigation.update(activities: visibleActivities, requests: visibleRequests, inbox: inbox,
+            navigation.update(activities: visibleActivities + ((!demo && codexPinnedOnly && enabled.contains(.codex)) ? pinnedCodexThreads.sorted().filter { id in
+                !visibleActivities.contains { $0.threadID == id && $0.sourceHostID == nil }
+            }.map { SessionActivity(id: AgentProvider.codex.activityID(sessionID: $0, sourceHostID: nil), sessionID: $0) } : []), requests: visibleRequests, inbox: inbox,
                 cloudContext: cloudNavigationContext) { activity in
                 guard !activity.isInternalReview, !activity.isIgnoredCodexSession else { return false }
                 if activity.provider == .deepseek { return true }
@@ -2386,6 +2418,7 @@ actor EngineRuntime {
             },
             claudeRemoteSetups: claudeRemoteSetups, connections: connectionPresentation(), codexProgressSetup: codexProgressSetup,
             deepseekProgressSetup: deepseekProgressSetup)
+        if !demo && codexPinnedOnly && enabled.contains(.codex) { snapshot.presentation.includePinned(pinnedCodexTitles) }
         snapshot.expandedPanel = EngineExpandedPanel(settings: panelSettings, enabled: enabled, snapshots: snapshots,
             hasBudget: hasBudget, at: date)
         snapshot.wslAvailability = demo ? .available : wslAvailability

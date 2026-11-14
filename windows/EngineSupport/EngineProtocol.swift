@@ -43,6 +43,7 @@ struct EngineCommand: Decodable {
         var expandedPanel: EngineExpandedPanelSettings?
         var claudeProgressRing: Bool?
         var codexProgressRing: Bool?
+        var codexPinnedOnly: Bool?
         var deepseekProgressRing: Bool?
         var retentionMinutes: Int?
         var enabledProviders: [String]?
@@ -271,7 +272,7 @@ struct EngineSnapshot: Codable, Equatable {
     let waitingCount: Int
     let totalTokensPerSecond: Double?
     let rateIsFresh: Bool
-    let presentation: EnginePresentation
+    var presentation: EnginePresentation
     let wallet: EngineWallet?
     let modules: [EngineModule]?
     let quotaDashboard: EngineQuotaDashboard?
